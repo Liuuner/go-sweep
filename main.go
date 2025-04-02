@@ -3,6 +3,9 @@ package main
 import (
 	"flag"
 	"fmt"
+	"github.com/charmbracelet/bubbles/key"
+	"github.com/charmbracelet/bubbles/stopwatch"
+	"math"
 	"math/rand"
 	"os"
 	"strings"
@@ -14,127 +17,263 @@ import (
 )
 
 const (
-	DEFAULT_WIDTH  = 30
-	DEFAULT_HEIGHT = 30
-	DEFAULT_MINES  = 99
+	DEFAULT_WIDTH  = 9
+	DEFAULT_HEIGHT = 9
+	DEFAULT_MINES  = 10
 )
 
-var wFlag, hFlag, numMinesFlag int
-var shouldUseEmoji bool
+type keyMap struct {
+	Up     key.Binding
+	Down   key.Binding
+	Left   key.Binding
+	Right  key.Binding
+	Sweep  key.Binding
+	Flag   key.Binding
+	New    key.Binding
+	Redraw key.Binding
+	Help   key.Binding
+	Quit   key.Binding
+}
+
+var DefaultKeyMap = keyMap{
+	Left: key.NewBinding(
+		key.WithKeys("h", "left"),
+		key.WithHelp("h", "move left"),
+	),
+	Down: key.NewBinding(
+		key.WithKeys("j", "down"),
+		key.WithHelp("j", "move down"),
+	),
+	Up: key.NewBinding(
+		key.WithKeys("k", "up"),
+		key.WithHelp("k", "move up"),
+	),
+	Right: key.NewBinding(
+		key.WithKeys("l", "right"),
+		key.WithHelp("l", "move right"),
+	),
+	Sweep: key.NewBinding(
+		key.WithKeys("enter", " "),
+		key.WithHelp("enter/space", "sweep"),
+	),
+	Flag: key.NewBinding(
+		key.WithKeys("f"),
+		key.WithHelp("f", "flag"),
+	),
+	New: key.NewBinding(
+		key.WithKeys("N"),
+		key.WithHelp("N", "new game"),
+	),
+	Redraw: key.NewBinding(
+		key.WithKeys("r"),
+		key.WithHelp("r", "redraw"),
+	),
+	Help: key.NewBinding(
+		key.WithKeys("?"),
+		key.WithHelp("?", "toggle help"),
+	),
+	Quit: key.NewBinding(
+		key.WithKeys("Q", "esc", "ctrl+c"),
+		key.WithHelp("Q", "quit"),
+	),
+}
+
+// ShortHelp returns keybindings to be shown in the mini help view. It's part
+// of the key.Map interface.
+func (k keyMap) ShortHelp() []key.Binding {
+	return []key.Binding{k.Help, k.Quit}
+}
+
+// FullHelp returns keybindings for the expanded help view. It's part of the
+// key.Map interface.
+func (k keyMap) FullHelp() [][]key.Binding {
+	return [][]key.Binding{
+		{k.Up, k.Down, k.Left, k.Right},    // first column
+		{k.Sweep, k.Flag, k.New, k.Redraw}, // first column
+		{k.Help, k.Quit},                   // second column
+	}
+}
 
 func main() {
+	var wFlag, hFlag, numMinesFlag int
+	var shouldUseEmoji, previewTheme bool
+
 	flag.IntVar(&wFlag, "w", DEFAULT_WIDTH, "minefield width")
 	flag.IntVar(&hFlag, "h", DEFAULT_HEIGHT, "minefield height")
 	flag.IntVar(&numMinesFlag, "n", DEFAULT_MINES, "number of mines")
 	flag.BoolVar(&shouldUseEmoji, "e", false, "use emoji characters")
+	flag.BoolVar(&previewTheme, "preview", false, "preview theme")
 
 	flag.Parse()
 
-	m := initialModel(wFlag, hFlag, numMinesFlag, shouldUseEmoji)
-	p := tea.NewProgram(m)
+	prefs := preferences{
+		width:          wFlag,
+		height:         hFlag,
+		numberOfMines:  numMinesFlag,
+		showHelp:       true,
+		shouldUseEmoji: shouldUseEmoji,
+		isDebug:        false,
+	}
+
+	m := initialModel(prefs)
+	p := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseCellMotion())
 	if _, err := p.Run(); err != nil {
 		fmt.Printf("There's been an error: %v", err)
 		os.Exit(1)
 	}
 }
 
-func initialModel(width int, height int, numMines int, shouldUseEmoji bool) model {
-	positions := make(stack[point], 0, width*height)
-	minefield := make([][]cell, height)
+func placeMines(minefield [][]cell, prefs preferences) {
+	if prefs.numberOfMines >= prefs.width*prefs.height {
+		panic("Too many mines for the given field size")
+	}
 
-	for y := range minefield {
-		minefield[y] = make([]cell, width)
-		for x := range minefield[y] {
-			minefield[y][x] = cell{}
-			positions.push(point{x: x, y: y})
+	positions := make([][2]int, 0, prefs.width*prefs.height)
+	for y := 0; y < prefs.height; y++ {
+		for x := 0; x < prefs.width; x++ {
+			positions = append(positions, [2]int{x, y})
 		}
 	}
 
-	// TODO instantiate the mines after the first sweep to make sure first
-	// click never hits a mine
-	r := rand.New(rand.NewSource(time.Now().UnixNano()))
-	r.Shuffle(len(positions), func(i, j int) {
-		positions[i], positions[j] = positions[j], positions[i]
-	})
-	numMines = min(numMines, width*height)
-	for i := 0; i < numMines && i < width*height; i++ {
-		p := positions.pop()
-		minefield[p.y][p.x].isMine = true
+	rand.New(rand.NewSource(time.Now().UnixNano()))
+	rand.Shuffle(len(positions), func(i, j int) { positions[i], positions[j] = positions[j], positions[i] })
+
+	for i := 0; i < prefs.numberOfMines; i++ {
+		x, y := positions[i][0], positions[i][1]
+		minefield[y][x].isMine = true
 	}
+}
+
+func placeMinesSkipCursor(minefield [][]cell, prefs preferences, cursorPos [2]int) {
+	if prefs.numberOfMines >= prefs.width*prefs.height {
+		panic("Too many mines for the given field size")
+	}
+
+	positions := make([][2]int, 0, prefs.width*prefs.height)
+	for y := 0; y < prefs.height; y++ {
+		for x := 0; x < prefs.width; x++ {
+			// don't place mines on the cursor
+			if x == cursorPos[0] && y == cursorPos[1] {
+				continue
+			}
+			positions = append(positions, [2]int{x, y})
+		}
+	}
+
+	rand.New(rand.NewSource(time.Now().UnixNano()))
+	rand.Shuffle(len(positions), func(i, j int) { positions[i], positions[j] = positions[j], positions[i] })
+
+	for i := 0; i < prefs.numberOfMines; i++ {
+		x, y := positions[i][0], positions[i][1]
+		minefield[y][x].isMine = true
+	}
+}
+
+func debugPrintMinefield(minefield [][]cell) {
+	s := strings.Builder{}
+	for y := range minefield {
+		for _, c := range minefield[y] {
+			if c.isMine {
+				s.WriteString("M")
+			} else {
+				s.WriteString("-")
+			}
+		}
+		s.WriteString("\n")
+	}
+	fmt.Println(s.String())
+}
+
+func initialModel(prefs preferences) model {
+	minefield := make([][]cell, prefs.height)
+
+	for y := range minefield {
+		minefield[y] = make([]cell, prefs.width)
+		for x := range minefield[y] {
+			minefield[y][x] = cell{}
+		}
+	}
+
+	//debugPrintMinefield(minefield)
+
+	// TODO instantiate the mines after the first sweep to make sure first click never hits a mine
+	//placeMines(minefield, prefs)
+
+	//debugPrintMinefield(minefield)
 
 	return model{
-		prefs: preferences{
-			width:          width,
-			height:         height,
-			numberOfMines:  numMines,
-			showHelp:       true,
-			shouldUseEmoji: shouldUseEmoji,
-		},
+		stopwatch: stopwatch.NewWithInterval(time.Second),
+		keys:      DefaultKeyMap,
+		prefs:     prefs,
 		minefield: minefield,
-		cursorX:   width/2 - 1,
-		cursorY:   height/2 - 1,
+		cursorX:   prefs.width / 2,
+		cursorY:   prefs.height / 2,
 	}
 }
-
-type tickMsg struct{}
 
 func (m model) Init() tea.Cmd {
-	return tick()
-}
-
-func tick() tea.Cmd {
-	return func() tea.Msg {
-		time.Sleep(1 * time.Second)
-		return tickMsg{}
-	}
+	return tea.Batch(
+		m.stopwatch.Init(),
+		m.stopwatch.Stop(),
+		m.stopwatch.Reset(),
+		tea.SetWindowTitle("Go-Sweep"),
+	)
 }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	cursorCell := &m.minefield[m.cursorY][m.cursorX]
 
-	cursorMine := &m.minefield[m.cursorY][m.cursorX]
+	var cmd tea.Cmd
+	if m.isRunning && !m.isGameOver {
+		m.stopwatch, cmd = m.stopwatch.Update(msg)
+	}
 
 	switch msg := msg.(type) {
-	case tickMsg:
-		if m.isGameOver {
-			break
-		}
-		m.secondsElapsed++
-		return m, tick()
+	case tea.WindowSizeMsg:
+		// If we set a width on the help menu it can gracefully truncate
+		// its view as needed.
+		m.help.Width = msg.Width
+		m.screenHeight = msg.Height
 	case tea.KeyMsg:
-		switch msg.String() {
-		case "ctrl+c", "q":
+		switch {
+		case key.Matches(msg, DefaultKeyMap.Quit):
 			return m, tea.Quit
-		case "up", "k":
+		case key.Matches(msg, DefaultKeyMap.Up):
 			m.cursorY--
 			if m.cursorY < 0 {
 				m.cursorY = m.prefs.height - 1
 			}
-		case "down", "j":
+		case key.Matches(msg, DefaultKeyMap.Down):
 			m.cursorY++
 			if m.cursorY > m.prefs.height-1 {
 				m.cursorY = 0
 			}
-		case "left", "h":
+		case key.Matches(msg, DefaultKeyMap.Left):
 			m.cursorX--
 			if m.cursorX < 0 {
 				m.cursorX = m.prefs.width - 1
 			}
-		case "right", "l":
+		case key.Matches(msg, DefaultKeyMap.Right):
 			m.cursorX++
 			if m.cursorX > m.prefs.width-1 {
 				m.cursorX = 0
 			}
-		case "r":
+		case key.Matches(msg, DefaultKeyMap.New):
 			isDebug := m.prefs.isDebug
-			y, x := m.cursorY, m.cursorX
+			//y, x := m.cursorY, m.cursorX
 			showHelp := m.prefs.showHelp
-			isEmoji := m.prefs.shouldUseEmoji
-			m = initialModel(wFlag, hFlag, numMinesFlag, isEmoji)
+			m = initialModel(m.prefs)
+			m.isRunning = false
 			m.prefs.isDebug = isDebug
-			m.cursorY, m.cursorX = y, x
+			//m.cursorY, m.cursorX = y, x
 			m.prefs.showHelp = showHelp
 			break
-		case "enter", " ":
+		case key.Matches(msg, DefaultKeyMap.Sweep):
+			if !m.isRunning && !m.isGameOver {
+				cmd = m.stopwatch.Start()
+				m.isRunning = true
+				placeMinesSkipCursor(m.minefield, m.prefs, [2]int{m.cursorX, m.cursorY})
+			}
 			if m.isGameOver {
 				break
 			}
@@ -142,36 +281,33 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if checkDidWin(m) {
 				m.isGameOver = true
 			}
-		case "f":
+		case key.Matches(msg, DefaultKeyMap.Flag):
+			if !m.isRunning && !m.isGameOver {
+				break
+			}
 			if m.isGameOver {
 				break
 			}
-			if cursorMine.isRevealed {
+			if cursorCell.isRevealed {
 				sweep(m.cursorX, m.cursorY, &m, true, make(set[point]))
 			} else {
-				cursorMine.isFlagged = !cursorMine.isFlagged
+				cursorCell.isFlagged = !cursorCell.isFlagged
 			}
-		case "d":
-			m.prefs.isDebug = !m.prefs.isDebug
-		case "?":
-			m.prefs.showHelp = !m.prefs.showHelp
-		case "e":
-			m.prefs.shouldUseEmoji = !m.prefs.shouldUseEmoji
+		case key.Matches(msg, m.keys.Help):
+			m.help.ShowAll = !m.help.ShowAll
 		}
 	}
 
-	return m, nil
+	return m, cmd
 }
 
 func (m model) View() string {
 	var sb strings.Builder
 	writeHeader(&sb, m)
 	sb.WriteString("\n\n")
-	if m.prefs.shouldUseEmoji {
-		writeMinefield(&sb, m)
-	} else {
-		writeAsciiMinefield(&sb, m)
-	}
+
+	writeAsciiMinefield(&sb, m)
+
 	sb.WriteString("\n\n")
 	writeHelp(&sb, m)
 	return sb.String()
@@ -179,58 +315,45 @@ func (m model) View() string {
 
 func writeHeader(sb *strings.Builder, m model) {
 	if m.isGameOver {
-		sb.WriteString("Game Over! ")
+		sb.WriteString("Game Over! \n")
 		if checkDidWin(m) {
-			sb.WriteString("You WON!!")
+			sb.WriteString("You WON!!\n")
 		} else {
-			sb.WriteString("You lost...")
+			sb.WriteString("You lost...\n")
 		}
 	} else {
-		sb.WriteString("...go sweep...")
-		sb.WriteString(fmt.Sprintf("\n%v mines left", minesLeft(m)))
+		sb.WriteString("...go sweep...\n")
+		sb.WriteString(fmt.Sprintf("%v mines left\n", minesLeft(m)))
 	}
-	sb.WriteString(fmt.Sprintf("\n%v seconds elapsed", m.secondsElapsed))
-}
-
-func writeMinefield(sb *strings.Builder, m model) {
-	for y, row := range m.minefield {
-		for x, mine := range row {
-			switch {
-			case x == m.cursorX && y == m.cursorY:
-				sb.WriteString("🔳")
-			case (m.isGameOver || m.prefs.isDebug) && mine.isMine:
-				sb.WriteString("💣")
-			case mine.isRevealed:
-				sb.WriteString(viewForMineAtPosition(x, y, m))
-			case mine.isFlagged:
-				sb.WriteString("🟨")
-			default:
-				sb.WriteString("⬜️")
-			}
-		}
-		sb.WriteString("\n")
-	}
+	sb.WriteString(m.stopwatch.View())
+	sb.WriteString(" elapsed\n")
 }
 
 func writeAsciiMinefield(sb *strings.Builder, m model) {
+	cursorChar := "⯀"
+	mineCharacter := "B"
+	flagCharacter := "▶"
+	//mineCharacter := "⬤"
+
 	strs := make([][]string, m.prefs.height)
 	for y, row := range m.minefield {
 		strs[y] = make([]string, m.prefs.width)
-		for x, mine := range row {
+		for x, c := range row {
 			switch {
-			case x == m.cursorX && y == m.cursorY:
-				strs[y][x] = "*"
-			case (m.isGameOver || m.prefs.isDebug) && mine.isMine:
-				strs[y][x] = "B"
-			case mine.isRevealed:
+			case (m.isGameOver || m.prefs.isDebug) && c.isMine:
+				strs[y][x] = mineCharacter
+			case c.isRevealed:
 				strs[y][x] = asciiViewForMineAtPosition(x, y, m)
-			case mine.isFlagged:
-				strs[y][x] = "F"
+			case c.isFlagged:
+				strs[y][x] = flagCharacter
 			default:
 				strs[y][x] = " "
 			}
 		}
 	}
+
+	unrevieldColor := "#313244"
+
 	t := table.New().
 		Border(lipgloss.NormalBorder()).
 		BorderRow(true).
@@ -240,9 +363,12 @@ func writeAsciiMinefield(sb *strings.Builder, m model) {
 			var fg lipgloss.TerminalColor = lipgloss.NoColor{}
 			var bg lipgloss.TerminalColor = lipgloss.NoColor{}
 
-			switch strs[row-1][col] {
+			s := lipgloss.NewStyle().
+				Padding(0, 1)
+
+			switch strs[row][col] {
 			case "0":
-				fg = lipgloss.Color("#292929")
+				strs[row][col] = ""
 			case "1":
 				fg = lipgloss.Color("#74adf2")
 			case "2":
@@ -260,39 +386,57 @@ func writeAsciiMinefield(sb *strings.Builder, m model) {
 			case "8":
 				fg = lipgloss.Color("#111")
 				bg = lipgloss.Color("#bfbfbf")
-			case "*":
-				fg = lipgloss.Color("#FF33FF")
-			case "F":
-				bg = lipgloss.Color("#ffee00")
-				fg = lipgloss.Color("#111")
-			case "B":
-				bg = lipgloss.Color("#FF0000")
-				fg = lipgloss.Color("#111")
-			case " ":
-				bg = lipgloss.Color("#bfbfbf")
+			/*case "*":
+			fg = lipgloss.Color("#FF33FF")*/
+			case flagCharacter:
+				fg = lipgloss.Color("#ffee00")
+				//bg = lipgloss.Color(unrevieldColor)
+
+				//fg = lipgloss.Color("#111")
+			case mineCharacter:
+				fg = lipgloss.Color("#FF0000")
+				s = s.Bold(true)
+				//fg = lipgloss.Color("#111")
+			case " ", cursorChar:
+				bg = lipgloss.Color(unrevieldColor)
 			}
 
-			return lipgloss.NewStyle().
+			// if the cursor is on this cell, highlight it
+			if m.cursorX == col && m.cursorY == row {
+				if strs[row][col] == " " || strs[row][col] == cursorChar {
+					strs[row][col] = cursorChar
+					//bg = lipgloss.Color("#313244")
+					fg = lipgloss.Color("#7f849c")
+
+					//strs[row][col] = "█"
+					//fg = lipgloss.Color("#bfbfbf")
+					//bg = lipgloss.Color("#bfbfbf")
+				} else {
+					noCol := lipgloss.NoColor{}
+					if bg != noCol {
+						fg = bg
+					}
+					bg = lipgloss.Color("#585b70")
+					//bg = lipgloss.Color("#313244")
+				}
+			}
+
+			return s.
 				Foreground(fg).
-				Background(bg).
-				Padding(0, 1)
+				Background(bg)
 		})
+
 	sb.WriteString(t.Render())
 }
 
 func writeHelp(sb *strings.Builder, m model) {
-	if m.prefs.showHelp {
-		if !m.isGameOver {
-			sb.WriteString("Press h/j/k/l or ←↓↑→ to move\n")
-			sb.WriteString("Press enter or space to sweep\n")
-			sb.WriteString("Press f to toggle flag.\n")
-			sb.WriteString("Press d to toggle debug.\n")
-		}
-		sb.WriteString("Press q to quit.\n")
-		sb.WriteString("Press r to start a new game.\n")
-		sb.WriteString("Press ? to toggle help text\n")
-		sb.WriteString("Press a to toggle ascii view\n")
-	}
+	helpView := m.help.View(m.keys)
+	// prepare the string builder so that help is at bottom of papge
+	calculatedHeight := m.screenHeight - strings.Count(sb.String(), "\n") - strings.Count(helpView, "\n")
+	paddingHeight := math.Max(float64(calculatedHeight), 0)
+	sb.WriteString(strings.Repeat("\n", int(paddingHeight)))
+	sb.WriteString(helpView)
+	//sb.WriteString("\n")
 }
 
 func sweep(x, y int, m *model, userInitiatedSweep bool, swept set[point]) {
@@ -355,25 +499,6 @@ func asciiViewForMineAtPosition(x, y int, m model) string {
 		return "B"
 	}
 	return fmt.Sprint(countAdjacentMines(x, y, m))
-}
-
-func viewForMineAtPosition(x, y int, m model) string {
-	if m.minefield[y][x].isMine {
-		return "💣"
-	}
-	touching := countAdjacentMines(x, y, m)
-	numViewMap := map[int]string{
-		0: "⬛️",
-		1: "1️⃣",
-		2: "2️⃣",
-		3: "3️⃣",
-		4: "4️⃣",
-		5: "5️⃣",
-		6: "6️⃣",
-		7: "7️⃣",
-		8: "8️⃣",
-	}
-	return numViewMap[touching]
 }
 
 func forEachSurroundingCellDo(x, y int, m *model, do func(x, y int, m *model)) {

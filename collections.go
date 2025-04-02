@@ -1,19 +1,5 @@
 package main
 
-type stack[T comparable] []T
-
-func (s *stack[T]) pop() T {
-	tmp := (*s)[len(*s)-1]
-	*s = (*s)[:len(*s)-1]
-	return tmp
-}
-func (s *stack[T]) push(elem T) {
-	*s = append(*s, elem)
-}
-func (s stack[T]) peek() T {
-	return s[len(s)-1]
-}
-
 type set[T comparable] map[T]struct{}
 
 func (s set[T]) has(value T) bool {

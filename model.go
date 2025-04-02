@@ -1,12 +1,21 @@
 package main
 
+import (
+	"github.com/charmbracelet/bubbles/help"
+	"github.com/charmbracelet/bubbles/stopwatch"
+)
+
 type model struct {
-	prefs          preferences
-	minefield      [][]cell
-	cursorX        int
-	cursorY        int
-	isGameOver     bool
-	secondsElapsed int
+	keys         keyMap
+	help         help.Model
+	screenHeight int
+	stopwatch    stopwatch.Model
+	prefs        preferences
+	minefield    [][]cell
+	cursorX      int
+	cursorY      int
+	isGameOver   bool
+	isRunning    bool
 }
 
 type preferences struct {
