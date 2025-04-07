@@ -1,4 +1,4 @@
-package main
+package cmd
 
 import (
 	"github.com/charmbracelet/bubbles/help"
@@ -19,12 +19,11 @@ type model struct {
 }
 
 type preferences struct {
-	width          int
-	height         int
-	numberOfMines  int
-	isDebug        bool
-	showHelp       bool
-	shouldUseEmoji bool
+	width         int
+	height        int
+	numberOfMines int
+	isDebug       bool
+	showHelp      bool
 }
 
 type cell struct {

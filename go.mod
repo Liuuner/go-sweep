@@ -1,4 +1,4 @@
-module github.com/Liuuner/go-sweep
+module github.com/Liuuner/go-puzzles
 
 go 1.24
 
