@@ -1,38 +1,25 @@
 package cmd
 
 import (
-	"github.com/charmbracelet/bubbles/help"
-	"github.com/charmbracelet/bubbles/stopwatch"
+	"github.com/Liuuner/go-puzzles/src/internal/puzzles"
 )
 
 type model struct {
-	keys         keyMap
-	help         help.Model
-	screenHeight int
-	stopwatch    stopwatch.Model
-	prefs        preferences
-	minefield    [][]cell
-	cursorX      int
-	cursorY      int
-	isGameOver   bool
-	isRunning    bool
+	terminalInfo   TerminalInfo
+	layout         layout
+	puzzleOpened   bool
+	selectedPuzzle int
+	puzzle         puzzles.Puzzle
+	puzzles        []puzzles.Puzzle
 }
 
-type preferences struct {
-	width         int
-	height        int
-	numberOfMines int
-	isDebug       bool
-	showHelp      bool
+type layout struct {
+	headerHeight        int
+	selectionHeight     int
+	selectionItemsInRow int
 }
 
-type cell struct {
-	isMine     bool
-	isFlagged  bool
-	isRevealed bool
-}
-
-type point struct {
-	x int
-	y int
+type TerminalInfo struct {
+	fullWidth  int
+	fullHeight int
 }
