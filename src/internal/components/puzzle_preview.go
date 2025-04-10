@@ -21,6 +21,6 @@ func SimplePuzzlePreview(title string, icon string) string {
 	}
 
 	topPart := lipgloss.Place(common.Config.SelectionContainerWidth, iconHeight, lipgloss.Center, lipgloss.Top, icon)
-	titlePart := lipgloss.Place(common.Config.SelectionContainerWidth, common.Config.SelectionContainerHeight-iconHeight, lipgloss.Center, lipgloss.Top, title)
+	titlePart := lipgloss.Place(common.Config.SelectionContainerWidth, common.Config.SelectionContainerHeight-iconHeight, lipgloss.Center, lipgloss.Top, lipgloss.NewStyle().Bold(true).Render(title))
 	return lipgloss.JoinVertical(lipgloss.Center, topPart, titlePart)
 }

@@ -1,23 +1,94 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"github.com/Liuuner/go-puzzles/src/internal/common"
+	"github.com/Liuuner/go-puzzles/src/internal/components"
 	"github.com/Liuuner/go-puzzles/src/internal/puzzles"
 	"github.com/Liuuner/go-puzzles/src/internal/puzzles/minesweeper"
 	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/urfave/cli/v3"
 	"os"
+	"slices"
 	"strings"
 )
 
 func Run() {
-	//puzzle := minesweeper.Minesweeper{}.New()
-	puzzle := puzzles.EmptyPuzzle{}
 
+	cmd := &cli.Command{
+		EnableShellCompletion: true,
+		Name:                  "go-puzzles",
+		Version:               "v0.0.1-dev",
+		HideVersion:           true,
+		HideHelpCommand:       true,
+		Description:           "A collection of terminal puzzles",
+		Commands: []*cli.Command{
+			{
+				Name:     "minesweeper",
+				Usage:    "Play minesweeper",
+				Aliases:  []string{"ms"},
+				Category: "Games",
+				Action: func(ctx context.Context, cmd *cli.Command) error {
+					return runStandalone(minesweeper.NewWithContext(ctx))
+				},
+				Flags: []cli.Flag{
+					cli.HelpFlag,
+					&cli.IntFlag{
+						Name:        "width",
+						Aliases:     []string{"w"},
+						Usage:       "Width of the minesweeper field",
+						Required:    false,
+						HideDefault: true,
+					},
+					&cli.IntFlag{
+						Name:        "height",
+						Aliases:     []string{"h"},
+						Usage:       "Height of the minesweeper field",
+						Required:    false,
+						HideDefault: true,
+					},
+					&cli.IntFlag{
+						Name:        "mines",
+						Aliases:     []string{"m"},
+						Usage:       "Number of mines in the field",
+						Required:    false,
+						HideDefault: true,
+					},
+					&cli.StringFlag{
+						Name:        "difficulty",
+						Usage:       "Difficulty level of the minesweeper game (beginner, intermediate, expert)",
+						Aliases:     []string{"d"},
+						Required:    false,
+						HideDefault: true,
+						Validator: func(d string) error {
+							difficulties := []string{"beginner", "intermediate", "expert"}
+							if !slices.Contains(difficulties, d) {
+								return fmt.Errorf("invalid difficulty level: %s, valid levels are: %v", d, difficulties)
+							}
+							return nil
+						},
+					},
+				},
+			},
+		},
+		Action: func(ctx context.Context, cmd *cli.Command) error {
+			return runDefault()
+		},
+	}
+
+	if err := cmd.Run(context.Background(), os.Args); err != nil {
+		//log.Fatal(err)
+		fmt.Println(err)
+		os.Exit(1)
+	}
+}
+
+func runDefault() error {
 	m := model{
-		puzzle:         puzzle,
+		puzzle:         puzzles.EmptyPuzzle{},
 		puzzleOpened:   false,
 		selectedPuzzle: 0,
 		puzzles:        []puzzles.Puzzle{minesweeper.Minesweeper{}, puzzles.EmptyPuzzle{}, puzzles.EmptyPuzzle{}, puzzles.EmptyPuzzle{}, puzzles.EmptyPuzzle{}, puzzles.EmptyPuzzle{}, puzzles.EmptyPuzzle{}, puzzles.EmptyPuzzle{}, puzzles.EmptyPuzzle{}},
@@ -28,9 +99,22 @@ func Run() {
 
 	p := tea.NewProgram(m, tea.WithAltScreen() /*, tea.WithMouseCellMotion()*/)
 	if _, err := p.Run(); err != nil {
-		fmt.Printf("Aye! There's been an error: %v", err)
-		os.Exit(1)
+		return err
 	}
+	return nil
+}
+
+func runStandalone(puzzle puzzles.Puzzle) error {
+	m := model{
+		puzzle:         puzzle,
+		standaloneMode: true,
+	}
+
+	p := tea.NewProgram(m, tea.WithAltScreen() /*, tea.WithMouseCellMotion()*/)
+	if _, err := p.Run(); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (m model) Init() tea.Cmd {
@@ -42,22 +126,31 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.handleWindowResize(msg)
 	}
 
+	if keyMsg, ok := msg.(tea.KeyMsg); ok && keyMsg.String() == "ctrl+c" {
+		return m, tea.Quit
+	}
+
 	if _, ok := msg.(common.QuitGameMsg); ok {
+		if m.standaloneMode {
+			return m, tea.Quit
+		}
 		m.puzzleOpened = false
 		m.puzzle = puzzles.EmptyPuzzle{}
 	}
 
 	var batch tea.Cmd
 
-	if m.puzzleOpened {
+	if m.puzzleOpened || m.standaloneMode {
 		puzzle, cmd := m.puzzle.Update(msg)
 		m.puzzle = puzzle
 		batch = tea.Batch(batch, cmd)
 	} else {
 		if keyMsg, ok := msg.(tea.KeyMsg); ok {
+			// todo handleKeyMsg will tell when a puzzle is selected
 			m, batch = m.handleKeyMsg(keyMsg)
 			if m.puzzleOpened {
-				batch = tea.Batch(batch, m.puzzle.Init())
+				// todo when all m.puzzle.Init() commands are finished, we return the PuzzleReady Cmd or something in this fashion
+				batch = tea.Batch(batch, m.puzzle.Init(), tea.WindowSize())
 			}
 		}
 	}
@@ -97,7 +190,7 @@ func (m model) handleKeyMsg(msg tea.KeyMsg) (model, tea.Cmd) {
 }
 
 func (m model) View() string {
-	if m.puzzleOpened {
+	if m.puzzleOpened || m.standaloneMode {
 		return m.puzzle.View()
 	}
 
@@ -122,34 +215,9 @@ func (m *model) handleWindowResize(msg tea.WindowSizeMsg) {
 }
 
 func drawHeader(m model) string {
-	title := lipgloss.NewStyle().
-		Bold(true).
-		Render("⚄ Terminal Puzzles ⚄")
+	title := lipgloss.NewStyle().Bold(true).Render("Go Puzzles")
 
-	help := "Help: ?           "
-
-	header := lipgloss.PlaceHorizontal(m.terminalInfo.fullWidth, lipgloss.Center, title)
-	header = overwriteEnd(header, help)
-
-	return lipgloss.NewStyle().
-		BorderStyle(lipgloss.NormalBorder()).
-		BorderBottom(true).
-		Render(header)
-}
-
-// overwriteEnd overwrites the end of the base string with the overwrite string
-func overwriteEnd(base, overwrite string) string {
-	baseRunes := []rune(base)
-	overwriteRunes := []rune(overwrite)
-
-	if len(overwriteRunes) > len(baseRunes) {
-		// If overwrite string is longer than base, return overwrite
-		return overwrite
-	}
-
-	// Overwrite the last characters
-	copy(baseRunes[len(baseRunes)-len(overwriteRunes):], overwriteRunes)
-	return string(baseRunes)
+	return components.Header(m.terminalInfo.fullWidth, "v0.0.1-dev", title, "Help: ?")
 }
 
 func drawPuzzleSelection(m model) string {

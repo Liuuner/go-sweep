@@ -3,9 +3,11 @@ module github.com/Liuuner/go-puzzles
 go 1.24
 
 require (
+	github.com/76creates/stickers v1.4.1
 	github.com/charmbracelet/bubbles v0.20.0
 	github.com/charmbracelet/bubbletea v1.3.4
 	github.com/charmbracelet/lipgloss v1.1.0
+	github.com/urfave/cli/v3 v3.1.1
 )
 
 require (

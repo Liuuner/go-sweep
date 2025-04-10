@@ -1,6 +1,7 @@
 package puzzles
 
 import (
+	"github.com/Liuuner/go-puzzles/src/internal/common"
 	"github.com/Liuuner/go-puzzles/src/internal/components"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -32,8 +33,8 @@ func (p EmptyPuzzle) Update(msg tea.Msg) (Puzzle, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		switch msg.String() {
-		case "q", "Q", "ctrl+c":
-			return p, tea.Quit
+		case "q", "Q":
+			return p, common.QuitGame
 		}
 	}
 	return p, nil

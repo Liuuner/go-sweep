@@ -11,6 +11,7 @@ type model struct {
 	selectedPuzzle int
 	puzzle         puzzles.Puzzle
 	puzzles        []puzzles.Puzzle
+	standaloneMode bool
 }
 
 type layout struct {

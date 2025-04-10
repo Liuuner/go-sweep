@@ -1,15 +1,12 @@
 package minesweeper
 
 import (
-	"github.com/charmbracelet/bubbles/help"
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/stopwatch"
 )
 
 type Minesweeper struct {
 	keys         keyMap
-	help         help.Model
-	screenHeight int
 	stopwatch    stopwatch.Model
 	prefs        preferences
 	minefield    [][]cell
@@ -17,6 +14,8 @@ type Minesweeper struct {
 	cursorY      int
 	isGameOver   bool
 	isRunning    bool
+	screenHeight int
+	screenWidth  int
 }
 
 type keyMap struct {

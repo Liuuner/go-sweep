@@ -1,6 +1,7 @@
 package minesweeper
 
 import (
+	"context"
 	"fmt"
 	"github.com/Liuuner/go-puzzles/src/internal/common"
 	"github.com/Liuuner/go-puzzles/src/internal/components"
@@ -10,7 +11,6 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/lipgloss/table"
-	"math"
 	"math/rand"
 	"strings"
 	"time"
@@ -22,7 +22,21 @@ const (
 	DEFAULT_MINES  = 10
 )
 
-var DefaultKeyMap = keyMap{
+var difficulties = map[string]struct {
+	width, height, mines int
+}{
+	"beginner":     {9, 9, 10},
+	"intermediate": {16, 16, 40},
+	"expert":       {30, 16, 99},
+}
+
+var (
+	cursorChar    = "⯀"
+	mineCharacter = "B"
+	flagCharacter = "▶"
+)
+
+var defaultKeyMap = keyMap{
 	Left: key.NewBinding(
 		key.WithKeys("h", "left"),
 		key.WithHelp("h", "move left"),
@@ -50,10 +64,6 @@ var DefaultKeyMap = keyMap{
 	New: key.NewBinding(
 		key.WithKeys("N"),
 		key.WithHelp("N", "new game"),
-	),
-	Redraw: key.NewBinding(
-		key.WithKeys("r"),
-		key.WithHelp("r", "redraw"),
 	),
 	Help: key.NewBinding(
 		key.WithKeys("?"),
@@ -104,6 +114,20 @@ func (m Minesweeper) New() puzzles.Puzzle {
 	return initialModel(prefs)
 }
 
+func NewWithContext(ctx context.Context) puzzles.Puzzle {
+
+	// enable flags
+	prefs := preferences{
+		width:         DEFAULT_WIDTH,
+		height:        DEFAULT_HEIGHT,
+		numberOfMines: DEFAULT_MINES,
+		showHelp:      true,
+		isDebug:       false,
+	}
+
+	return initialModel(prefs)
+}
+
 func (m Minesweeper) Init() tea.Cmd {
 	return tea.Batch(
 		m.stopwatch.Init(),
@@ -121,33 +145,33 @@ func (m Minesweeper) Update(msg tea.Msg) (puzzles.Puzzle, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		// If we set a width on the help menu it can gracefully truncate
 		// its view as needed.
-		m.help.Width = msg.Width
+		m.screenWidth = msg.Width
 		m.screenHeight = msg.Height
 	case tea.KeyMsg:
 		switch {
-		case key.Matches(msg, DefaultKeyMap.Quit):
+		case key.Matches(msg, defaultKeyMap.Quit):
 			return m, common.QuitGame
-		case key.Matches(msg, DefaultKeyMap.Up):
+		case key.Matches(msg, defaultKeyMap.Up):
 			m.cursorY--
 			if m.cursorY < 0 {
 				m.cursorY = m.prefs.height - 1
 			}
-		case key.Matches(msg, DefaultKeyMap.Down):
+		case key.Matches(msg, defaultKeyMap.Down):
 			m.cursorY++
 			if m.cursorY > m.prefs.height-1 {
 				m.cursorY = 0
 			}
-		case key.Matches(msg, DefaultKeyMap.Left):
+		case key.Matches(msg, defaultKeyMap.Left):
 			m.cursorX--
 			if m.cursorX < 0 {
 				m.cursorX = m.prefs.width - 1
 			}
-		case key.Matches(msg, DefaultKeyMap.Right):
+		case key.Matches(msg, defaultKeyMap.Right):
 			m.cursorX++
 			if m.cursorX > m.prefs.width-1 {
 				m.cursorX = 0
 			}
-		case key.Matches(msg, DefaultKeyMap.New):
+		case key.Matches(msg, defaultKeyMap.New):
 			isDebug := m.prefs.isDebug
 			//y, x := m.cursorY, m.cursorX
 			showHelp := m.prefs.showHelp
@@ -157,7 +181,7 @@ func (m Minesweeper) Update(msg tea.Msg) (puzzles.Puzzle, tea.Cmd) {
 			//m.cursorY, m.cursorX = y, x
 			m.prefs.showHelp = showHelp
 			break
-		case key.Matches(msg, DefaultKeyMap.Sweep):
+		case key.Matches(msg, defaultKeyMap.Sweep):
 			if m.isGameOver {
 				break
 			}
@@ -172,7 +196,7 @@ func (m Minesweeper) Update(msg tea.Msg) (puzzles.Puzzle, tea.Cmd) {
 			if checkDidWin(m) {
 				m.isGameOver = true
 			}
-		case key.Matches(msg, DefaultKeyMap.Flag):
+		case key.Matches(msg, defaultKeyMap.Flag):
 			if !m.isRunning && !m.isGameOver {
 				break
 			}
@@ -185,8 +209,8 @@ func (m Minesweeper) Update(msg tea.Msg) (puzzles.Puzzle, tea.Cmd) {
 			} else {
 				cursorCell.isFlagged = !cursorCell.isFlagged
 			}
-		case key.Matches(msg, m.keys.Help):
-			m.help.ShowAll = !m.help.ShowAll
+		//case key.Matches(msg, m.keys.Help):
+		//	m.help.ShowAll = !m.help.ShowAll
 		case msg.String() == "S":
 			solveMinesweeper(&m)
 		}
@@ -196,15 +220,11 @@ func (m Minesweeper) Update(msg tea.Msg) (puzzles.Puzzle, tea.Cmd) {
 }
 
 func (m Minesweeper) View() string {
-	var sb strings.Builder
-	writeHeader(&sb, m)
-	sb.WriteString("\n\n")
-
-	writeAsciiMinefield(&sb, m)
-
-	sb.WriteString("\n\n")
-	writeHelp(&sb, m)
-	return sb.String()
+	header := writeHeader(m)
+	bodyHeight := m.screenHeight - lipgloss.Height(header)
+	minefield := writeAsciiMinefield(m)
+	body := lipgloss.Place(m.screenWidth, bodyHeight, lipgloss.Center, lipgloss.Center, minefield)
+	return lipgloss.JoinVertical(lipgloss.Left, header, body)
 }
 
 func (m Minesweeper) Preview() string {
@@ -216,12 +236,20 @@ func (m Minesweeper) Preview() string {
 	├───┼───┼───┤
 	│   │   │   │
 	└───┴───┴───┘`*/
-	icon := `
-┌───┬───┬───┬───┐
-│   │   │   │   │
-├───┼───┼───┼───┤
-│   │   │   │   │
-└───┴───┴───┴───┘`
+	/*icon := `
+	┌───┬───┬───┬───┐
+	│   │   │   │   │
+	├───┼───┼───┼───┤
+	│   │   │   │   │
+	└───┴───┴───┴───┘`*/
+	minefield := [][]string{
+		{"0", "1", "B"},
+		{"2", flagCharacter, " "},
+	}
+	m.cursorX = -10
+	m.cursorY = -10
+	icon := renderAsciiMinefield(m, minefield)
+
 	return components.SimplePuzzlePreview("Minesweeper", strings.TrimPrefix(icon, "\n"))
 }
 
@@ -230,7 +258,7 @@ func initialModel(prefs preferences) Minesweeper {
 
 	return Minesweeper{
 		stopwatch: stopwatch.NewWithInterval(time.Second),
-		keys:      DefaultKeyMap,
+		keys:      defaultKeyMap,
 		prefs:     prefs,
 		minefield: minefield,
 		cursorX:   prefs.width / 2,
@@ -255,7 +283,7 @@ func testSolver() {
 		sweep(m.cursorX, m.cursorY, &m, true, make(common.Set[point]))
 		sb1 := strings.Builder{}
 		sb1.WriteString("Trying to solve:\n")
-		writeAsciiMinefield(&sb1, m)
+		sb1.WriteString(writeAsciiMinefield(m))
 
 		sb2 := strings.Builder{}
 		ok := solveMinesweeper(&m)
@@ -265,7 +293,7 @@ func testSolver() {
 		} else {
 			sb2.WriteString(fmt.Sprintf("Failed to solve: Remaining: %d\n", minesLeft(m)))
 		}
-		writeAsciiMinefield(&sb2, m)
+		sb2.WriteString(writeAsciiMinefield(m))
 
 		sb3 := strings.Builder{}
 		if !ok {
@@ -279,7 +307,7 @@ func testSolver() {
 				}
 			}
 			sb3.WriteString("Revealed:\n")
-			writeAsciiMinefield(&sb3, m)
+			sb3.WriteString(writeAsciiMinefield(m))
 			sb3.WriteString("\n")
 		}
 
@@ -348,27 +376,25 @@ func createEmptyMinefield(prefs preferences) [][]cell {
 	return minefield
 }
 
-func writeHeader(sb *strings.Builder, m Minesweeper) {
+func writeHeader(m Minesweeper) string {
+	var status string
+
 	if m.isGameOver {
-		sb.WriteString("Game Over! \n")
 		if checkDidWin(m) {
-			sb.WriteString("You WON!!\n")
+			status = "You WON!!"
 		} else {
-			sb.WriteString("You lost...\n")
+			status = "You lost..."
 		}
 	} else {
-		sb.WriteString("...go sweep...\n")
-		sb.WriteString(fmt.Sprintf("%v mines left\n", minesLeft(m)))
+		status = fmt.Sprintf("%v mines left", minesLeft(m))
 	}
-	sb.WriteString(m.stopwatch.View())
-	sb.WriteString(" elapsed\n")
+
+	elapsed := m.stopwatch.View() + " elapsed"
+
+	return components.Header(m.screenWidth, status+" | "+elapsed, lipgloss.NewStyle().Bold(true).Render("Minesweeper"), "Help: ?")
 }
 
-func writeAsciiMinefield(sb *strings.Builder, m Minesweeper) {
-	cursorChar := "⯀"
-	mineCharacter := "B"
-	flagCharacter := "▶"
-	//mineCharacter := "⬤"
+func writeAsciiMinefield(m Minesweeper) string {
 
 	strs := make([][]string, m.prefs.height)
 	for y, row := range m.minefield {
@@ -387,6 +413,10 @@ func writeAsciiMinefield(sb *strings.Builder, m Minesweeper) {
 		}
 	}
 
+	return renderAsciiMinefield(m, strs)
+}
+
+func renderAsciiMinefield(m Minesweeper, strs [][]string) string {
 	unrevieldColor := "#313244"
 
 	t := table.New().
@@ -461,17 +491,7 @@ func writeAsciiMinefield(sb *strings.Builder, m Minesweeper) {
 				Background(bg)
 		})
 
-	sb.WriteString(t.Render())
-}
-
-func writeHelp(sb *strings.Builder, m Minesweeper) {
-	helpView := m.help.View(m.keys)
-	// prepare the string builder so that help is at bottom of papge
-	calculatedHeight := m.screenHeight - strings.Count(sb.String(), "\n") - strings.Count(helpView, "\n")
-	paddingHeight := math.Max(float64(calculatedHeight), 0)
-	sb.WriteString(strings.Repeat("\n", int(paddingHeight)))
-	sb.WriteString(helpView)
-	//sb.WriteString("\n")
+	return t.Render()
 }
 
 func sweep(x, y int, m *Minesweeper, userInitiatedSweep bool, swept common.Set[point]) {
