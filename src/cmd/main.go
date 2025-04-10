@@ -11,6 +11,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/urfave/cli/v3"
+	"log"
 	"os"
 	"slices"
 	"strings"
@@ -32,7 +33,7 @@ func Run() {
 				Aliases:  []string{"ms"},
 				Category: "Games",
 				Action: func(ctx context.Context, cmd *cli.Command) error {
-					return runStandalone(minesweeper.NewWithContext(ctx))
+					return runStandalone(minesweeper.NewWithCmd(cmd))
 				},
 				Flags: []cli.Flag{
 					cli.HelpFlag,
@@ -80,9 +81,7 @@ func Run() {
 	}
 
 	if err := cmd.Run(context.Background(), os.Args); err != nil {
-		//log.Fatal(err)
-		fmt.Println(err)
-		os.Exit(1)
+		log.Fatal(err)
 	}
 }
 
@@ -146,7 +145,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		batch = tea.Batch(batch, cmd)
 	} else {
 		if keyMsg, ok := msg.(tea.KeyMsg); ok {
-			// todo handleKeyMsg will tell when a puzzle is selected
+			// todo handleKeyMsg will tell when a puzzle is selected with a cmd like PuzzleSelected
 			m, batch = m.handleKeyMsg(keyMsg)
 			if m.puzzleOpened {
 				// todo when all m.puzzle.Init() commands are finished, we return the PuzzleReady Cmd or something in this fashion

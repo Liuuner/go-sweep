@@ -1,7 +1,6 @@
 package minesweeper
 
 import (
-	"context"
 	"fmt"
 	"github.com/Liuuner/go-puzzles/src/internal/common"
 	"github.com/Liuuner/go-puzzles/src/internal/components"
@@ -11,6 +10,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/lipgloss/table"
+	"github.com/urfave/cli/v3"
 	"math/rand"
 	"strings"
 	"time"
@@ -114,13 +114,29 @@ func (m Minesweeper) New() puzzles.Puzzle {
 	return initialModel(prefs)
 }
 
-func NewWithContext(ctx context.Context) puzzles.Puzzle {
+func NewWithCmd(cmd *cli.Command) puzzles.Puzzle {
+	var (
+		width  = DEFAULT_WIDTH
+		height = DEFAULT_HEIGHT
+		mines  = DEFAULT_MINES
+	)
+	if cmd != nil {
+		if cmd.Int("width") != 0 {
+			width = int(cmd.Int("width"))
+		}
+		if cmd.Int("height") != 0 {
+			height = int(cmd.Int("height"))
+		}
+		if cmd.Int("mines") != 0 {
+			mines = int(cmd.Int("mines"))
+		}
+	}
 
 	// enable flags
 	prefs := preferences{
-		width:         DEFAULT_WIDTH,
-		height:        DEFAULT_HEIGHT,
-		numberOfMines: DEFAULT_MINES,
+		width:         width,
+		height:        height,
+		numberOfMines: mines,
 		showHelp:      true,
 		isDebug:       false,
 	}
